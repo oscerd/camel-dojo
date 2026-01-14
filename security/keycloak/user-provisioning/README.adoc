@@ -1,0 +1,72 @@
+= User Provisioning
+
+Automate user onboarding via API or bulk CSV imports.
+
+== Description
+
+This example demonstrates automated user lifecycle management using the Camel Keycloak component's admin API. It provides two ways to create users: a REST API for individual user creation, and a file-based bulk import that processes CSV files. The bulk import uses Camel's file component to watch an `inbox` directory - when a CSV file is dropped there, the route parses each row, creates a `UserRepresentation` object, and calls Keycloak's admin API to provision the user. Successfully processed files move to `processed/`, while failures go to `error/`. This pattern is useful for HR systems integration, employee onboarding automation, or migrating users from legacy identity providers.
+
+== Running It
+
+[source,sh]
+----
+./setup-keycloak.sh
+jbang -Dcamel.jbang.version=4.18.0-SNAPSHOT camel@apache/camel run --port 8081 user-provisioning.camel.yaml --properties application.properties --dep camel:keycloak
+----
+
+== What Gets Created
+
+* Realm: `enterprise`
+* Client: `user-provisioning` (has admin privileges for user management)
+* Roles by department: `engineering`, `sales`, `marketing`, `hr`, `finance`
+* Access level roles: `employee`, `manager`, `director`, `admin`
+* Directories: `inbox/`, `processed/`, `error/` for file-based imports
+
+== Endpoints
+
+* `POST /api/users`: create a single user
+* `POST /api/users/bulk`: create multiple users at once
+* `POST /api/users/{id}/roles`: assign roles
+* `POST /api/users/{id}/verify-email`: trigger verification email
+* `POST /api/registration`: self-service registration
+
+== Try It
+
+Create a user:
+
+[source,sh]
+----
+curl -X POST http://localhost:8081/api/users \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "username": "john.doe",
+    "email": "john@company.com",
+    "firstName": "John",
+    "lastName": "Doe",
+    "department": "engineering",
+    "jobTitle": "Software Engineer"
+  }'
+----
+
+== Bulk Import via CSV
+
+Drop a CSV file in the `inbox/` directory and the route picks it up automatically.
+
+CSV format (see `inbox/sample-users.csv.example`):
+
+[source,csv]
+----
+username,email,firstName,lastName,department,jobTitle,manager
+john.doe,john.doe@company.com,John,Doe,engineering,Software Engineer,jane.smith
+jane.smith,jane.smith@company.com,Jane,Smith,engineering,Engineering Manager,
+----
+
+To test:
+
+[source,sh]
+----
+cp inbox/sample-users.csv.example inbox/sample-users.csv
+----
+
+* Successfully processed files are moved to `processed/`
+* Failed files are moved to `error/`

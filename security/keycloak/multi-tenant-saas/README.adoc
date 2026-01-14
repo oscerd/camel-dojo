@@ -1,0 +1,48 @@
+= Multi-Tenant SaaS
+
+Realm-per-tenant isolation. Each tenant gets its own Keycloak realm so their users and data never mix.
+
+== Description
+
+This example shows how to build a multi-tenant SaaS application where each customer (tenant) has complete data isolation. The architecture uses one Keycloak realm per tenant, meaning each organization has its own user base, roles, and authentication settings. When a request arrives, the Camel route validates that the JWT token was issued by the correct realm matching the `X-Tenant-ID` header. This prevents a critical security vulnerability: users from one tenant cannot access another tenant's data even if they manipulate request headers. The `KeycloakSecurityPolicy` automatically fetches public keys from each realm's JWKS endpoint and validates both the token signature and issuer claim, ensuring cryptographic proof of tenant membership.
+
+== Running It
+
+[source,sh]
+----
+./setup-keycloak.sh
+jbang -Dcamel.jbang.version=4.18.0-SNAPSHOT camel@apache/camel run --port 8081 multi-tenant.camel.yaml --properties application.properties --dep camel:keycloak
+----
+
+== What Gets Created
+
+Three tenant realms: `acme`, `globex`, `initech`
+
+Each realm has:
+
+* Client: `saas-app`
+* Roles: `tenant-user`, `tenant-admin`
+* Users: `user@<tenant>.com` and `admin@<tenant>.com` (password: `password`)
+
+== Try It
+
+[source,sh]
+----
+# Get a token for Acme
+ACME_TOKEN=$(curl -s -X POST \
+  'http://localhost:8080/realms/acme/protocol/openid-connect/token' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'username=user@acme.com&password=password&grant_type=password&client_id=saas-app&client_secret=acme-secret-12345' \
+  | jq -r '.access_token')
+
+# Access Acme's data
+curl -H "Authorization: Bearer $ACME_TOKEN" -H "X-Tenant-ID: acme" \
+  http://localhost:8081/api/data
+
+# Try accessing Globex data with Acme token (this fails)
+curl -H "Authorization: Bearer $ACME_TOKEN" -H "X-Tenant-ID: globex" \
+  http://localhost:8081/api/data
+# -> 403
+----
+
+The gateway validates that the token's realm matches the X-Tenant-ID header. No cross-tenant access allowed.

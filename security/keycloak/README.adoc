@@ -1,0 +1,160 @@
+= Camel Keycloak Dojo
+:toc: left
+:toclevels: 3
+
+Production-ready examples for integrating Apache Camel with Keycloak.
+
+== What's This?
+
+A set of hands-on examples covering common enterprise security patterns with Camel and Keycloak. Each one tackles a specific use case you'd encounter in real projects.
+
+== Before You Start
+
+You'll need:
+
+* https://www.jbang.dev[JBang]
+* Docker
+* `jq` for parsing JSON responses
+* Some familiarity with OAuth2/OIDC basics
+
+=== Setting Up JBang
+
+[source,sh]
+----
+curl -Ls https://sh.jbang.dev | bash -s - app setup
+jbang --version
+jbang app install camel@apache/camel
+----
+
+== Running Keycloak
+
+All examples share a single Keycloak instance. Pick whichever method works for you:
+
+=== Via Camel JBang
+
+[source,sh]
+----
+# Requires Camel 4.17+ for Docker 29.x
+jbang -Dcamel.jbang.version=4.17.0-SNAPSHOT camel@apache/camel infra run keycloak
+----
+
+Starts Keycloak at http://localhost:8080 with admin/admin credentials.
+
+=== Via Docker
+
+[source,sh]
+----
+docker run -d \
+  --name keycloak-dojo \
+  -p 8080:8080 \
+  -e KEYCLOAK_ADMIN=admin \
+  -e KEYCLOAK_ADMIN_PASSWORD=admin \
+  quay.io/keycloak/keycloak:latest \
+  start-dev
+----
+
+== Getting Started
+
+[source,sh]
+----
+# Start Keycloak first
+jbang -Dcamel.jbang.version=4.17.0-SNAPSHOT camel@apache/camel infra run keycloak
+
+# Pick an example
+cd microservices-api-gateway
+
+# Configure Keycloak (creates realm, users, roles, etc.)
+./setup-keycloak.sh
+
+# Run it
+camel run *
+----
+
+== The Examples
+
+|===
+| Example | What It Does
+
+| link:microservices-api-gateway/README.adoc[API Gateway]
+| Secure gateway with role-based routing
+
+| link:multi-tenant-saas/README.adoc[Multi-Tenant SaaS]
+| One realm per tenant, token-based tenant isolation
+
+| link:user-provisioning/README.adoc[User Provisioning]
+| Automated user onboarding, bulk imports
+
+| link:security-audit-logging/README.adoc[Audit Logging]
+| Event-driven audit trail for compliance
+
+| link:service-to-service-auth/README.adoc[Service-to-Service]
+| Client credentials flow for M2M auth
+
+| link:fine-grained-authorization/README.adoc[Fine-Grained Authz]
+| Permission-based access with document classification
+
+|===
+
+== About the Setup Scripts
+
+Each example has a `setup-keycloak.sh` that handles all the Keycloak configuration: creating the realm, setting up clients, defining roles, creating test users. It also updates `application.properties` with the generated secrets.
+
+You can override defaults with environment variables:
+
+* `KEYCLOAK_URL` (default: http://localhost:8080)
+* `KEYCLOAK_ADMIN` (default: admin)
+* `KEYCLOAK_ADMIN_PASSWORD` (default: admin)
+
+== Quick Keycloak Primer
+
+*Realms* isolate security domains. Users, roles, and clients in one realm are invisible to others.
+
+*Clients* represent applications:
+
+* Confidential: has a secret, used by backend services
+* Public: no secret, for SPAs and mobile apps
+* Bearer-only: just validates tokens, doesn't authenticate
+
+*Roles* come in two flavors: realm roles (global) and client roles (scoped to a specific client).
+
+== Using Keycloak in Camel Routes
+
+The security policy protects routes:
+
+[source,yaml]
+----
+- beans:
+  - name: keycloakPolicy
+    type: org.apache.camel.component.keycloak.security.KeycloakSecurityPolicy
+    properties:
+      serverUrl: "{{keycloak.server.url}}"
+      realm: "{{keycloak.realm}}"
+      clientId: "{{keycloak.client.id}}"
+      clientSecret: "{{keycloak.client.secret}}"
+      requiredRoles: "admin,user"
+----
+
+The Keycloak component handles admin operations:
+
+[source,yaml]
+----
+# Create users
+- to: "keycloak:admin?operation=createUser"
+
+# Consume events
+- from: "keycloak:events?eventType=events&types=LOGIN,LOGOUT"
+----
+
+== Troubleshooting
+
+*Docker errors with camel infra?* Use Camel 4.17+ or run Keycloak directly with Docker.
+
+*401 Unauthorized?* Token might be expired. Check the Authorization header format is `Bearer <token>`.
+
+*403 Forbidden?* User lacks the required role. Check role assignments in the Keycloak console.
+
+*Connection refused?* Keycloak isn't running or is on a different port than expected.
+
+== License
+
+Apache License 2.0

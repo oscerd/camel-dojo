@@ -1,0 +1,67 @@
+= Fine-Grained Authorization
+
+Permission-based access control for a document management system. Users see different documents depending on their roles and clearance level.
+
+== Description
+
+This example goes beyond simple role checking to implement attribute-based access control (ABAC) for a document management system. The route not only validates that users have a base role (employee) to access the API, but also dynamically filters the response based on additional roles like `confidential-access` or `admin`. The logic extracts roles from the JWT token and uses them to determine which documents to include in the response - employees see only public documents, managers with confidential access see more sensitive materials, and admins see everything including restricted security audits. This pattern is useful when you need to return different data to different users from the same endpoint, rather than simply allowing or denying access. It demonstrates how to combine Camel's policy-based security with custom business logic for fine-grained data filtering.
+
+== Running It
+
+[source,sh]
+----
+./setup-keycloak.sh
+jbang -Dcamel.jbang.version=4.18.0-SNAPSHOT camel@apache/camel run --port 8081 fine-grained-authz.camel.yaml --properties application.properties --dep camel:keycloak
+----
+
+== What Gets Created
+
+* Realm: `documents`
+* Client: `document-api`
+* Roles: `employee`, `manager`, `admin`, `confidential-access`
+
+Test users:
+
+* `employee-user` / `password`: just employee role, public docs only
+* `manager-user` / `password`: employee + manager + confidential-access
+* `admin-user` / `password`: everything
+
+== Access Matrix
+
+|===
+| Role | What They Can Do
+
+| employee | Read public documents
+| manager | Read/write docs, access confidential material
+| admin | Full access including restricted docs and system settings
+| confidential-access | Required for confidential classification
+|===
+
+== Try It
+
+[source,sh]
+----
+# Employee token
+TOKEN=$(curl -s -X POST \
+  'http://localhost:8080/realms/documents/protocol/openid-connect/token' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'username=employee-user&password=password&grant_type=password&client_id=document-api&client_secret=document-api-secret-12345' \
+  | jq -r '.access_token')
+
+# Employee sees fewer documents
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/documents
+
+# Employee can't access settings
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/settings
+# -> 403
+
+# Admin gets full access
+ADMIN_TOKEN=$(curl -s -X POST \
+  'http://localhost:8080/realms/documents/protocol/openid-connect/token' \
+  -d 'username=admin-user&password=password&grant_type=password&client_id=document-api&client_secret=document-api-secret-12345' \
+  | jq -r '.access_token')
+
+curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8080/api/settings
+----
+
+The document listing is filtered server-side based on the user's roles. Employees never even see that confidential docs exist.

@@ -1,0 +1,66 @@
+= Service-to-Service Authentication
+
+Machine-to-machine auth using the OAuth 2.0 client credentials flow. No users involved, just services talking to each other.
+
+== Description
+
+This example demonstrates the OAuth 2.0 client credentials flow for machine-to-machine (M2M) authentication, where backend services communicate securely without user involvement. Each service (order-service, inventory-service, notification-service) has its own Keycloak service account with specific roles defining what operations it can perform. When the order-service needs to check inventory or send notifications, it authenticates using its client credentials to obtain an access token. The `KeycloakSecurityPolicy` validates incoming tokens and checks that the calling service has the required roles. Cross-service permissions are configured in Keycloak so services can only access what they need. Token caching is built in to avoid requesting new tokens for every call, improving performance in high-throughput scenarios.
+
+== Running It
+
+[source,sh]
+----
+./setup-keycloak.sh
+jbang -Dcamel.jbang.version=4.18.0-SNAPSHOT camel@apache/camel run --port 8081 m2m-service.camel.yaml --properties application.properties --dep camel:keycloak
+----
+
+== What Gets Created
+
+Realm: `services`
+
+Service accounts (clients with their own credentials):
+
+* `order-service`: can read/write/process orders
+* `inventory-service`: can manage inventory
+* `notification-service`: can send notifications
+
+Cross-service permissions are pre-configured so order-service can call inventory-service and notification-service when processing orders.
+
+== Endpoints
+
+* `GET /api/orders`: list orders (needs orders:read)
+* `POST /api/orders`: create order (needs orders:write)
+* `POST /api/orders/{id}/process`: process an order (chains calls to inventory and notification services)
+* `GET /debug/token`: see what's in the current token
+
+== Try It
+
+[source,sh]
+----
+# Get a service token
+TOKEN=$(curl -s -X POST \
+  'http://localhost:8080/realms/services/protocol/openid-connect/token' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'grant_type=client_credentials&client_id=order-service&client_secret=order-service-secret-12345' \
+  | jq -r '.access_token')
+
+# List orders
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/orders
+
+# Create an order
+curl -X POST http://localhost:8081/api/orders \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "customerId": "cust-123",
+    "items": [
+      {"productId": "prod-001", "quantity": 2, "price": 29.99},
+      {"productId": "prod-002", "quantity": 1, "price": 49.99}
+    ]
+  }'
+
+# Inspect the token cache
+curl http://localhost:8081/debug/token
+----
+
+Token caching is built in, so no need to request a new token for every call.

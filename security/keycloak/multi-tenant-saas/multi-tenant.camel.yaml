@@ -1,0 +1,94 @@
+# camel-k: dependency=camel:keycloak
+
+- onException:
+    exception:
+      - "org.apache.camel.CamelAuthorizationException"
+    handled:
+      constant: true
+    steps:
+      - setHeader:
+          name: CamelHttpResponseCode
+          constant: 403
+      - setBody:
+          simple: '{"error": "Forbidden", "message": "Access denied for tenant: ${header.X-Tenant-ID}"}'
+      - setHeader:
+          name: Content-Type
+          constant: application/json
+
+- beans:
+  - name: acmePolicy
+    type: org.apache.camel.component.keycloak.security.KeycloakSecurityPolicy
+    properties:
+      serverUrl: "{{keycloak.server.url}}"
+      realm: "acme"
+      clientId: "{{keycloak.client.id}}"
+      clientSecret: "{{keycloak.acme.client.secret}}"
+      requiredRoles: "tenant-user"
+
+  - name: globexPolicy
+    type: org.apache.camel.component.keycloak.security.KeycloakSecurityPolicy
+    properties:
+      serverUrl: "{{keycloak.server.url}}"
+      realm: "globex"
+      clientId: "{{keycloak.client.id}}"
+      clientSecret: "{{keycloak.globex.client.secret}}"
+      requiredRoles: "tenant-user"
+
+  - name: initechPolicy
+    type: org.apache.camel.component.keycloak.security.KeycloakSecurityPolicy
+    properties:
+      serverUrl: "{{keycloak.server.url}}"
+      realm: "initech"
+      clientId: "{{keycloak.client.id}}"
+      clientSecret: "{{keycloak.initech.client.secret}}"
+      requiredRoles: "tenant-user"
+
+- route:
+    id: health
+    from:
+      uri: "platform-http:/health"
+      steps:
+        - setBody:
+            simple: '{"status": "UP", "tenants": ["acme", "globex", "initech"]}'
+        - setHeader:
+            name: Content-Type
+            constant: application/json
+
+- route:
+    id: tenant-data
+    from:
+      uri: "platform-http:/api/data"
+      steps:
+        - setProperty:
+            name: tenantId
+            simple: "${header.X-Tenant-ID}"
+        - choice:
+            when:
+              - simple: "${exchangeProperty.tenantId} == 'acme'"
+                steps:
+                  - policy:
+                      ref: acmePolicy
+                  - setBody:
+                      simple: '{"tenant": "acme", "data": {"projects": 2, "users": 150}}'
+              - simple: "${exchangeProperty.tenantId} == 'globex'"
+                steps:
+                  - policy:
+                      ref: globexPolicy
+                  - setBody:
+                      simple: '{"tenant": "globex", "data": {"projects": 1, "users": 75}}'
+              - simple: "${exchangeProperty.tenantId} == 'initech'"
+                steps:
+                  - policy:
+                      ref: initechPolicy
+                  - setBody:
+                      simple: '{"tenant": "initech", "data": {"projects": 1, "users": 25}}'
+            otherwise:
+              steps:
+                - setHeader:
+                    name: CamelHttpResponseCode
+                    constant: 400
+                - setBody:
+                    simple: '{"error": "Missing or invalid X-Tenant-ID header"}'
+        - setHeader:
+            name: Content-Type
+            constant: application/json

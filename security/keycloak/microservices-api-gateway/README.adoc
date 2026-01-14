@@ -1,0 +1,66 @@
+= API Gateway with RBAC
+
+A secure API gateway that routes requests based on user roles.
+
+== Description
+
+This example demonstrates how to build a secure API gateway using Apache Camel and Keycloak. The gateway acts as a single entry point for multiple backend services, enforcing role-based access control (RBAC) on every request. Each endpoint is protected by a `KeycloakSecurityPolicy` that validates JWT tokens and checks for specific roles before allowing access. The pattern is common in microservices architectures where you need centralized authentication and fine-grained authorization. Users with different roles see different capabilities - a regular user can read orders but cannot access admin statistics, while an admin user has full access to all endpoints.
+
+== Running It
+
+[source,sh]
+----
+./setup-keycloak.sh
+jbang -Dcamel.jbang.version=4.18.0-SNAPSHOT camel@apache/camel run --port 8081 api-gateway.camel.yaml --properties application.properties --dep camel:keycloak
+----
+
+== What Gets Created
+
+The setup script configures:
+
+* Realm: `microservices`
+* Client: `api-gateway`
+* Roles: `api-user`, `api-admin`, `orders-read`, `orders-write`, `users-read`, `users-admin`
+
+Test users:
+
+* `user` / `password`: basic access (api-user, orders-read)
+* `admin-user` / `password`: full access
+
+== Endpoints
+
+|===
+| Path | Method | Role Required
+
+| `/api/health` | GET | none (public)
+| `/api/orders` | GET | orders-read
+| `/api/orders` | POST | orders-write
+| `/api/users` | GET | users-read
+| `/api/admin/stats` | GET | api-admin
+|===
+
+== Try It
+
+[source,sh]
+----
+# Grab a token for the regular user
+USER_TOKEN=$(curl -s -X POST \
+  'http://localhost:8080/realms/microservices/protocol/openid-connect/token' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'username=user&password=password&grant_type=password&client_id=api-gateway&client_secret=api-gateway-secret' \
+  | jq -r '.access_token')
+
+# Public endpoint works without auth
+curl http://localhost:8080/api/health
+
+# User can read orders
+curl -H "Authorization: Bearer $USER_TOKEN" http://localhost:8081/api/orders
+
+# But can't access admin stats
+curl -H "Authorization: Bearer $USER_TOKEN" http://localhost:8081/api/admin/stats
+# -> 403
+----
+
+== How It Works
+
+Different security policies are applied depending on the endpoint. Order endpoints check for orders-read/orders-write roles, admin endpoints require api-admin, and the health check is wide open.

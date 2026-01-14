@@ -1,0 +1,117 @@
+# camel-k: dependency=camel:keycloak
+
+- beans:
+  - name: employeePolicy
+    type: org.apache.camel.component.keycloak.security.KeycloakSecurityPolicy
+    properties:
+      serverUrl: "{{keycloak.server.url}}"
+      realm: "{{keycloak.realm}}"
+      clientId: "{{keycloak.client.id}}"
+      clientSecret: "{{keycloak.client.secret}}"
+      requiredRoles: "employee"
+
+  - name: managerPolicy
+    type: org.apache.camel.component.keycloak.security.KeycloakSecurityPolicy
+    properties:
+      serverUrl: "{{keycloak.server.url}}"
+      realm: "{{keycloak.realm}}"
+      clientId: "{{keycloak.client.id}}"
+      clientSecret: "{{keycloak.client.secret}}"
+      requiredRoles: "manager"
+
+  - name: confidentialPolicy
+    type: org.apache.camel.component.keycloak.security.KeycloakSecurityPolicy
+    properties:
+      serverUrl: "{{keycloak.server.url}}"
+      realm: "{{keycloak.realm}}"
+      clientId: "{{keycloak.client.id}}"
+      clientSecret: "{{keycloak.client.secret}}"
+      requiredRoles: "confidential-access"
+
+  - name: adminPolicy
+    type: org.apache.camel.component.keycloak.security.KeycloakSecurityPolicy
+    properties:
+      serverUrl: "{{keycloak.server.url}}"
+      realm: "{{keycloak.realm}}"
+      clientId: "{{keycloak.client.id}}"
+      clientSecret: "{{keycloak.client.secret}}"
+      requiredRoles: "admin"
+      useTokenIntrospection: true
+
+- onException:
+    exception:
+      - "org.apache.camel.CamelAuthorizationException"
+    handled:
+      constant: true
+    steps:
+      - setHeader:
+          name: CamelHttpResponseCode
+          constant: 403
+      - setBody:
+          simple: '{"error": "Forbidden", "message": "Insufficient permissions"}'
+      - setHeader:
+          name: Content-Type
+          constant: application/json
+
+- route:
+    id: health
+    from:
+      uri: "platform-http:/health"
+      steps:
+        - setBody:
+            simple: '{"status": "UP", "service": "document-api"}'
+        - setHeader:
+            name: Content-Type
+            constant: application/json
+
+- route:
+    id: list-documents
+    from:
+      uri: "platform-http:/api/documents"
+      steps:
+        - policy:
+            ref: employeePolicy
+        - script:
+            groovy: |
+              import com.fasterxml.jackson.databind.ObjectMapper
+              def mapper = new ObjectMapper()
+              def token = request.getHeader("Authorization")?.replace("Bearer ", "")
+              def roles = []
+              if (token) {
+                def parts = token.split("\\.")
+                def payload = new String(Base64.getUrlDecoder().decode(parts[1]))
+                def claims = mapper.readValue(payload, Map.class)
+                roles = claims.realm_access?.roles ?: []
+              }
+              def hasConfidential = roles.contains("confidential-access")
+              def isAdmin = roles.contains("admin")
+
+              def docs = [
+                [id: "DOC-001", title: "Public Report", classification: "public"],
+                [id: "DOC-002", title: "Team Notes", classification: "public"]
+              ]
+              if (hasConfidential || isAdmin) {
+                docs << [id: "DOC-003", title: "Financial Summary", classification: "confidential"]
+              }
+              if (isAdmin) {
+                docs << [id: "DOC-004", title: "Security Audit", classification: "restricted"]
+              }
+
+              def response = [documents: docs, total: docs.size(), accessLevel: isAdmin ? "admin" : (hasConfidential ? "confidential" : "public")]
+              request.body = mapper.writeValueAsString(response)
+        - setHeader:
+            name: Content-Type
+            constant: application/json
+
+- route:
+    id: settings
+    from:
+      uri: "platform-http:/api/settings"
+      steps:
+        - policy:
+            ref: adminPolicy
+        - setBody:
+            simple: '{"settings": {"maxUploadSize": "100MB", "retentionPeriod": "365 days"}}'
+        - setHeader:
+            name: Content-Type
+            constant: application/json

@@ -1,0 +1,47 @@
+= Security Audit Logging
+
+Event-driven audit trail for SOC 2, GDPR, HIPAA compliance.
+
+== Description
+
+This example implements a security audit system that captures and analyzes authentication events from Keycloak in real-time. Using the Camel Keycloak component's event consumer, the route polls for login attempts, logouts, registration events, password changes, and administrative actions. Each event is enriched with contextual information like IP addresses, timestamps, and user agents, then analyzed for suspicious patterns such as failed login attempts or unusual access times. Events are persisted to JSON files in the `audit-logs/` directory for integration with SIEM systems or compliance reporting tools. This pattern is essential for organizations that need to meet regulatory requirements like SOC 2, GDPR, or HIPAA, which mandate comprehensive audit trails of user access.
+
+== Running It
+
+[source,sh]
+----
+./setup-keycloak.sh
+jbang -Dcamel.jbang.version=4.18.0-SNAPSHOT camel@apache/camel run --port 8081 security-audit.camel.yaml --properties application.properties --dep camel:keycloak
+----
+
+== What Gets Created
+
+* Uses the `master` realm with events enabled
+* Client: `audit-service` (view-events permission)
+* Test user: `testuser` / `password`
+* Directories: `audit-logs/`, `reports/`
+
+== What It Does
+
+Consumes Keycloak events in real-time:
+
+* User events: LOGIN, LOGOUT, REGISTER, password changes, etc.
+* Admin events: user creation, role assignments, client modifications
+
+Events are enriched with risk indicators and written to the audit log. Suspicious patterns trigger alerts.
+
+== Try It
+
+[source,sh]
+----
+# Generate a login event
+curl -X POST 'http://localhost:8080/realms/master/protocol/openid-connect/token' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'username=testuser&password=password&grant_type=password&client_id=admin-cli'
+
+# Check what's been captured
+curl http://localhost:8081/api/stats
+curl http://localhost:8081/api/events/recent
+----
+
+Events show up in `audit-logs/` as JSON files, ready for your SIEM or log aggregator.

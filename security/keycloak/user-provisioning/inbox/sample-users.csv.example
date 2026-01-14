@@ -1,0 +1,7 @@
+username,email,firstName,lastName,department,jobTitle,manager
+john.doe,john.doe@company.com,John,Doe,engineering,Software Engineer,jane.smith
+jane.smith,jane.smith@company.com,Jane,Smith,engineering,Engineering Manager,
+bob.wilson,bob.wilson@company.com,Bob,Wilson,sales,Account Executive,alice.jones
+alice.jones,alice.jones@company.com,Alice,Jones,sales,Sales Director,
+carol.white,carol.white@company.com,Carol,White,hr,HR Specialist,david.brown
+david.brown,david.brown@company.com,David,Brown,hr,HR Manager,

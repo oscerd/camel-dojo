@@ -1,0 +1,121 @@
+# camel-k: dependency=camel:keycloak
+
+- beans:
+  - name: keycloak
+    type: org.apache.camel.component.keycloak.KeycloakComponent
+    properties:
+      serverUrl: "{{keycloak.server.url}}"
+      realm: "{{keycloak.realm}}"
+      authRealm: "{{keycloak.auth.realm}}"
+      username: "{{keycloak.username}}"
+      password: "{{keycloak.password}}"
+
+- route:
+    id: health
+    from:
+      uri: "platform-http:/health"
+      steps:
+        - setBody:
+            simple: '{"status": "UP", "service": "user-provisioning"}'
+        - setHeader:
+            name: Content-Type
+            constant: application/json
+
+- route:
+    id: create-user
+    from:
+      uri: "platform-http:/api/users"
+      steps:
+        - log:
+            message: "Creating user: ${body}"
+        - unmarshal:
+            json:
+              unmarshalType: java.util.Map
+        - script:
+            groovy: |
+              import org.keycloak.representations.idm.UserRepresentation
+              def input = request.body
+              def user = new UserRepresentation()
+              user.username = input.username
+              user.email = input.email
+              user.firstName = input.firstName
+              user.lastName = input.lastName
+              user.enabled = true
+              user.requiredActions = ["UPDATE_PASSWORD"]
+              def attrs = [:]
+              if (input.department) attrs.put("department", [input.department])
+              if (input.jobTitle) attrs.put("jobTitle", [input.jobTitle])
+              if (!attrs.isEmpty()) user.attributes = attrs
+              request.body = user
+        - setHeader:
+            name: CamelKeycloakRealmName
+            constant: "{{keycloak.realm}}"
+        - to: "keycloak:admin?operation=createUser&pojoRequest=true"
+        - setBody:
+            simple: '{"status": "success", "message": "User created"}'
+        - setHeader:
+            name: CamelHttpResponseCode
+            constant: 201
+        - setHeader:
+            name: Content-Type
+            constant: application/json
+
+- route:
+    id: registration
+    from:
+      uri: "platform-http:/api/registration"
+      steps:
+        - log:
+            message: "Registration request: ${body}"
+        - setBody:
+            simple: '{"status": "pending_approval", "message": "Your request is pending approval"}'
+        - setHeader:
+            name: CamelHttpResponseCode
+            constant: 202
+        - setHeader:
+            name: Content-Type
+            constant: application/json
+
+- route:
+    id: bulk-import
+    from:
+      uri: "file:inbox?move=../processed&moveFailed=../error&include=.*\\.csv"
+      steps:
+        - log:
+            message: "Processing bulk import file: ${header.CamelFileName}"
+        - unmarshal:
+            csv:
+              useMaps: true
+        - split:
+            simple: "${body}"
+            steps:
+              - setProperty:
+                  name: currentUsername
+                  simple: "${body[username]}"
+              - log:
+                  message: "Creating user: ${exchangeProperty.currentUsername}"
+              - script:
+                  groovy: |
+                    import org.keycloak.representations.idm.UserRepresentation
+                    def row = request.body
+                    def user = new UserRepresentation()
+                    user.username = row.username
+                    user.email = row.email
+                    user.firstName = row.firstName
+                    user.lastName = row.lastName
+                    user.enabled = true
+                    user.requiredActions = ["UPDATE_PASSWORD"]
+                    def attrs = [:]
+                    if (row.department) attrs.put("department", [row.department])
+                    if (row.jobTitle) attrs.put("jobTitle", [row.jobTitle])
+                    if (row.manager) attrs.put("manager", [row.manager])
+                    if (!attrs.isEmpty()) user.attributes = attrs
+                    request.body = user
+              - setHeader:
+                  name: CamelKeycloakRealmName
+                  constant: "{{keycloak.realm}}"
+              - to: "keycloak:admin?operation=createUser&pojoRequest=true"
+              - log:
+                  message: "User ${exchangeProperty.currentUsername} created successfully"
+        - log:
+            message: "Bulk import completed for file: ${header.CamelFileName}"

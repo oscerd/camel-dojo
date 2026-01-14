@@ -1,0 +1,94 @@
+# camel-k: dependency=camel:keycloak
+
+- beans:
+  - name: tokenCache
+    type: java.util.concurrent.ConcurrentHashMap
+
+  - name: ordersReadPolicy
+    type: org.apache.camel.component.keycloak.security.KeycloakSecurityPolicy
+    properties:
+      serverUrl: "{{keycloak.server.url}}"
+      realm: "{{keycloak.realm}}"
+      clientId: "{{keycloak.client.id}}"
+      clientSecret: "{{keycloak.client.secret}}"
+      requiredRoles: "orders:read"
+      useTokenIntrospection: true
+
+  - name: ordersWritePolicy
+    type: org.apache.camel.component.keycloak.security.KeycloakSecurityPolicy
+    properties:
+      serverUrl: "{{keycloak.server.url}}"
+      realm: "{{keycloak.realm}}"
+      clientId: "{{keycloak.client.id}}"
+      clientSecret: "{{keycloak.client.secret}}"
+      requiredRoles: "orders:write"
+
+- onException:
+    exception:
+      - "org.apache.camel.CamelAuthorizationException"
+    handled:
+      constant: true
+    steps:
+      - setHeader:
+          name: CamelHttpResponseCode
+          constant: 403
+      - setBody:
+          simple: '{"error": "Forbidden", "message": "Service not authorized"}'
+      - setHeader:
+          name: Content-Type
+          constant: application/json
+
+- route:
+    id: health
+    from:
+      uri: "platform-http:/health"
+      steps:
+        - setBody:
+            simple: '{"status": "UP", "service": "order-service"}'
+        - setHeader:
+            name: Content-Type
+            constant: application/json
+
+- route:
+    id: list-orders
+    from:
+      uri: "platform-http:/api/orders"
+      steps:
+        - choice:
+            when:
+              - simple: "${header.CamelHttpMethod} == 'GET'"
+                steps:
+                  - policy:
+                      ref: ordersReadPolicy
+                  - setBody:
+                      simple: '{"orders": [{"id": "ORD-001", "status": "pending"}]}'
+              - simple: "${header.CamelHttpMethod} == 'POST'"
+                steps:
+                  - policy:
+                      ref: ordersWritePolicy
+                  - setBody:
+                      simple: '{"id": "ORD-${date:now:yyyyMMddHHmmss}", "status": "created"}'
+                  - setHeader:
+                      name: CamelHttpResponseCode
+                      constant: 201
+        - setHeader:
+            name: Content-Type
+            constant: application/json
+
+- route:
+    id: debug-token
+    from:
+      uri: "platform-http:/debug/token"
+      steps:
+        - script:
+            groovy: |
+              def cache = camelContext.registry.lookupByName("tokenCache")
+              def response = [
+                cacheSize: cache?.size() ?: 0,
+                cached: cache?.keySet()?.toList() ?: []
+              ]
+              def mapper = new com.fasterxml.jackson.databind.ObjectMapper()
+              request.body = mapper.writeValueAsString(response)
+        - setHeader:
+            name: Content-Type
+            constant: application/json

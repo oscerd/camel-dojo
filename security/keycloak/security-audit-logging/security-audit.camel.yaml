@@ -1,0 +1,62 @@
+# camel-k: dependency=camel:keycloak
+
+- beans:
+  - name: keycloak
+    type: org.apache.camel.component.keycloak.KeycloakComponent
+    properties:
+      serverUrl: "{{keycloak.server.url}}"
+      realm: "{{keycloak.realm}}"
+      username: "{{keycloak.username}}"
+      password: "{{keycloak.password}}"
+
+- route:
+    id: health
+    from:
+      uri: "platform-http:/health"
+      steps:
+        - setBody:
+            simple: '{"status": "UP", "service": "security-audit-logging"}'
+        - setHeader:
+            name: Content-Type
+            constant: application/json
+
+- route:
+    id: stats
+    from:
+      uri: "platform-http:/api/stats"
+      steps:
+        - setBody:
+            simple: '{"eventsProcessed": {"today": 1547}, "alerts": {"critical": 2, "high": 7}}'
+        - setHeader:
+            name: Content-Type
+            constant: application/json
+
+- route:
+    id: recent-events
+    from:
+      uri: "platform-http:/api/events/recent"
+      steps:
+        - setBody:
+            simple: |
+              {"events": [
+                {"type": "LOGIN", "user": "testuser", "timestamp": "${date:now:yyyy-MM-dd HH:mm:ss}"},
+                {"type": "LOGOUT", "user": "admin", "timestamp": "${date:now-5m:yyyy-MM-dd HH:mm:ss}"}
+              ]}
+        - setHeader:
+            name: Content-Type
+            constant: application/json
+
+- route:
+    id: consume-events
+    from:
+      uri: "keycloak:audit?eventType=events&types=LOGIN,LOGIN_ERROR,LOGOUT&maxResults={{events.max.results}}"
+      steps:
+        - log:
+            message: "Event: ${body.type} for user ${body.userId}"
+        - choice:
+            when:
+              - simple: "${body.type} == 'LOGIN_ERROR'"
+                steps:
+                  - log:
+                      message: "ALERT: Failed login from IP ${body.ipAddress}"
+                      loggingLevel: WARN
