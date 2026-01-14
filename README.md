@@ -7,7 +7,6 @@ A collection of hands-on examples for learning Apache Camel integration patterns
 | Directory | Description |
 |-----------|-------------|
 | [security/](security/) | Security-related examples including authentication, authorization, and identity management |
-| [security/keycloak/](security/keycloak/) | Production-ready examples for integrating Apache Camel with Keycloak, covering common enterprise security patterns like API gateways, multi-tenant SaaS, user provisioning, audit logging, service-to-service authentication, and fine-grained authorization |
 
 ## About
 
